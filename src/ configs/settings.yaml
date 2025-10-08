@@ -1,0 +1,91 @@
+# Nifty 750 Trading Strategy System Configuration
+# Based on Timothy Knight's High-Probability Trade Setups
+
+# Universe Configuration
+universe:
+  nifty500_url: "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
+  micro250_url: "https://www.niftyindices.com/IndexConstituent/ind_niftymicrocap250_list.csv"
+  liquid_subset_size: 100  # Number of stocks for daily analysis
+  min_market_cap: 500      # Minimum market cap in crores
+  min_volume: 100000       # Minimum average daily volume
+
+# Data Configuration
+data:
+  years_history: 12        # Years of data to fetch (for 10-year backtest)
+  min_trading_days: 252    # Minimum trading days required
+  max_workers: 5           # Parallel data fetch workers
+  timeout_seconds: 30      # Request timeout
+
+# Strategy Configuration
+strategies:
+  min_risk_reward: 2.0     # Minimum risk/reward ratio
+  min_confidence: 0.5      # Minimum confidence threshold
+  max_risk_percent: 0.02   # Maximum risk per trade (2%)
+  max_positions: 8         # Maximum simultaneous positions
+  max_signals_per_stock: 2 # Maximum signals per stock per day
+
+# Pattern Detection Parameters
+patterns:
+  lookback_periods:
+    head_shoulders: 30
+    triangles: 20
+    double_tops: 40
+    flags: 15
+    moving_averages: 200
+
+  volume_thresholds:
+    surge: 2.0             # Volume surge multiplier
+    dry: 0.5               # Volume dry threshold
+    confirmation: 1.5      # Breakout volume confirmation
+
+# Technical Indicators
+indicators:
+  ema_periods: [20, 50, 200]
+  sma_periods: [20, 50, 200]
+  rsi_period: 14
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  bollinger:
+    period: 20
+    std_dev: 2
+  atr_period: 14
+  adx_period: 14
+
+# Backtesting Configuration
+backtesting:
+  initial_capital: 100000  # Starting capital
+  commission: 0.0025       # Commission per trade (0.25%)
+  slippage: 0.0002         # Slippage estimate
+  benchmark: "^NSEI"       # Benchmark index (Nifty 50)
+
+# Email Configuration
+email:
+  smtp_server: "smtp.gmail.com"
+  smtp_port: 465
+  default_recipient: "paras.m.parmar@gmail.com"
+  subject_format: "Nifty 750 Trading Signals - {date} (9:30 AM IST)"
+  max_signals_in_email: 25
+  attach_csv: true
+
+# Report Configuration
+report:
+  timezone: "Asia/Kolkata"
+  date_format: "%Y-%m-%d"
+  time_format: "%H:%M"
+
+# Logging Configuration
+logging:
+  level: "INFO"           # DEBUG, INFO, WARNING, ERROR
+  log_file: "trading_system.log"
+  max_file_size: "10MB"
+  backup_count: 5
+
+# System Configuration
+system:
+  output_directory: "out"
+  cache_directory: "configs"
+  max_execution_time: 3600  # Maximum execution time in seconds
+  retry_attempts: 3
+  retry_delay: 2            # Seconds between retries
