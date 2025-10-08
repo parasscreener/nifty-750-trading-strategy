@@ -1,0 +1,173 @@
+name: Nifty 750 Trading - Daily
+
+on:
+  schedule:
+    # 9:30 AM IST = 04:00 UTC; IST has no DST
+    - cron: '0 4 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nifty750-daily
+  cancel-in-progress: true
+
+jobs:
+  run-daily:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Update pip and setuptools
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-dev
+
+      - name: Install Python dependencies with retry
+        run: |
+          for i in {1..3}; do
+            echo "Installation attempt $i"
+            if pip install -r requirements.txt --timeout 120 --retries 3; then
+              echo "Dependencies installed successfully"
+              break
+            else
+              echo "Installation attempt $i failed"
+              if [ $i -eq 3 ]; then
+                echo "All installation attempts failed"
+                exit 1
+              fi
+              sleep 30
+            fi
+          done
+
+      - name: Verify installation
+        run: |
+          python -c "
+          import pandas as pd
+          import numpy as np
+          import yfinance as yf
+          import requests
+          import jinja2
+          print('All critical packages imported successfully')
+          print(f'Pandas: {pd.__version__}')
+          print(f'NumPy: {np.__version__}')
+          print(f'yfinance: {yf.__version__}')
+          "
+
+      - name: Set timezone for logs
+        run: sudo timedatectl set-timezone Asia/Kolkata
+
+      - name: Run trading system
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python run.py --mode daily --verbose
+
+      - name: Upload results artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trading-results-${{ github.run_number }}
+          path: |
+            out/*.json
+            out/*.csv
+            out/*.html
+            *.log
+          retention-days: 30
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Trading Analysis Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Execution Time:** $(date '+%Y-%m-%d %H:%M IST')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow Run:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Python Version:** $(python --version)" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "out/signals_latest.csv" ]; then
+            SIGNAL_COUNT=$(tail -n +2 out/signals_latest.csv 2>/dev/null | wc -l || echo "0")
+            echo "- **Signals Generated:** $SIGNAL_COUNT" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status:** Success" >> $GITHUB_STEP_SUMMARY
+          elif [ -f "out/results_latest.json" ]; then
+            echo "- **Status:** Partial Success" >> $GITHUB_STEP_SUMMARY
+            echo "- **Note:** Results generated but no signals found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "trading_system.log" ]; then
+            echo "### Recent Log Entries" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -10 trading_system.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create failure notification script
+        if: failure()
+        run: |
+          cat > notify_failure.py << 'EOF'
+          import os, smtplib
+          from email.mime.text import MIMEText
+          from datetime import datetime
+
+          try:
+              user = os.environ.get('EMAIL_USER')
+              password = os.environ.get('EMAIL_PASS')
+              to = os.environ.get('EMAIL_TO', user)
+
+              if user and password:
+                  run_id = os.environ.get('GITHUB_RUN_ID', 'unknown')
+                  repo = os.environ.get('GITHUB_REPOSITORY', 'unknown')
+
+                  subject = f'Trading System Failed - {datetime.now().strftime("%Y-%m-%d %H:%M IST")}'
+
+                  body = f'''<html><body>
+          <h2>Trading System Execution Failed</h2>
+          <p><strong>Time:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S IST")}</p>
+          <p><strong>Repository:</strong> {repo}</p>
+          <p><strong>Run ID:</strong> {run_id}</p>
+          <p><strong>Logs:</strong> <a href="https://github.com/{repo}/actions/runs/{run_id}">View Logs</a></p>
+          <p>The system will retry on the next scheduled execution.</p>
+          </body></html>'''
+
+                  msg = MIMEText(body, 'html')
+                  msg['Subject'] = subject
+                  msg['From'] = user
+                  msg['To'] = to
+
+                  with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as server:
+                      server.login(user, password)
+                      server.send_message(msg)
+
+                  print('Failure notification sent successfully')
+              else:
+                  print('Email credentials not available')
+
+          except Exception as e:
+              print(f'Failed to send failure notification: {e}')
+          EOF
+
+      - name: Send failure notification
+        if: failure()
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          python notify_failure.py
